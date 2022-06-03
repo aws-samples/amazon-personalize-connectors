@@ -1,0 +1,14 @@
+{
+    "batchInferencePath": "s3://[PERSONALIZE_MLOPS_BUCKET/batch/[DATASET_GROUP_NAME/[SOLUTION_NAME/[SOLUTION_NAME]-YYYY-MM-DD-HH-MM-SS/",
+    "performDeltaCheck": true,
+    "saveBatchInferenceErrors": false,
+    "connectors": {
+        "braze": {
+            "itemMetadataFields": ["name","description","price","image","category","style"],
+            "attributePrefix": "recs_",
+            "otherAttributes": {
+                "other_attrib1": "custom_value"
+            }
+        }
+    }
+}

@@ -1,0 +1,400 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: (P9E-CONNECTORS) - Amazon Personalize ETL connectors
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Description: >
+      Application environment name (such as "dev", "staging", "prod", etc). Used to organize parameters in SSM.
+    Default: prod
+
+  MaintainingPersonalizeStackName:
+    Type: String
+    Description: >
+      Name of an active CloudFormation stack that contains the resources for the "Maintaining Personalized Experiences with Machine Learning"
+      solution. This solution must already be deployed in the same account and region. The S3 bucket where Personalize batch inference job
+      output files are written are needed by this solution.
+    MinLength: 1
+    MaxLength: 255
+    AllowedPattern: "^[a-zA-Z][-a-zA-Z0-9]*$"
+
+  BrazeRestEndpointUrl:
+    Type: String
+    Description: >
+      Braze REST Endpoint to use when synchronizing recommendation details for users. See the Braze API
+      documentation (https://www.braze.com/docs/api/basics/#endpoints) to map your Braze instance or dashboard
+      URL to the appropriate REST Endpoint. The format should look like: https://rest.iad-01.braze.com
+    AllowedPattern: "^$|^https:\/\/rest.[a-z]{3}-[0-9]{2}.braze.[a-z]{2,}.*$"
+    ConstraintDescription: REST Endpoint must be something like https://rest.iad-01.braze.com
+    Default: ''
+
+  BrazeApiKey:
+    Type: String
+    Description: >
+      Braze API Key to use when synchronizing recommendation details for users. An API Key can be created in
+      the Braze dashboard/console. This key must have the "users.track" permission.
+    AllowedPattern: "^$|[A-Za-z0-9\\-]+"
+    NoEcho: true
+    Default: ''
+
+Conditions:
+  DeployBrazeResources: !Not [ !Equals [ !Ref BrazeRestEndpointUrl, '' ] ]
+
+Rules:
+  BrazeRule1:
+    RuleCondition: !Not [ !Equals [ !Ref BrazeRestEndpointUrl, '' ] ]
+    Assertions:
+      - Assert: !Not
+        - !Equals
+          - !Ref BrazeApiKey
+          - ''
+        AssertDescription: 'Braze API Key is required when the Braze REST Endpoint is specified'
+  BrazeRule2:
+    RuleCondition: !Not [ !Equals [ !Ref BrazeApiKey, '' ] ]
+    Assertions:
+      - Assert: !Not
+        - !Equals
+          - !Ref BrazeRestEndpointUrl
+          - ''
+        AssertDescription: 'Braze REST Endpoint is required when the Braze API Key is specified'
+
+Globals:
+  Function:
+    Runtime: python3.9
+    Tracing: Active
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+        POWERTOOLS_SERVICE_NAME: personalize_connectors
+        POWERTOOLS_METRICS_NAMESPACE: !Sub 'Personalize-Connectors-${AWS::StackName}'
+        POWERTOOLS_LOGGER_LOG_EVENT: true
+        POWERTOOLS_LOGGER_SAMPLE_RATE: 0
+    Tags:
+      CreatedBy: Amazon-Personalize-Connectors-Solution
+
+Resources:
+  ConnectorBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: CreatedBy
+          Value: Amazon-Personalize-Connectors-Solution
+
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: CreatedBy
+          Value: Amazon-Personalize-Connectors-Solution
+
+  EnqueueCommonLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      ContentUri: src/enqueue_layer
+      CompatibleRuntimes:
+        - python3.9
+    Metadata:
+      BuildMethod: python3.9
+
+##########################################################################
+#  Glue ETL Jobs                                                         #
+##########################################################################
+
+  GlueJobRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Execution role for Glue ETL jobs
+      Path: /service-role/
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: ProjectBuckets
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:*
+                Resource:
+                  - !GetAtt ConnectorBucket.Arn
+                  - Fn::Join:
+                    - ""
+                    - - !GetAtt ConnectorBucket.Arn
+                      - "/*"
+                  - !GetAtt ArtifactBucket.Arn
+                  - Fn::Join:
+                    - ""
+                    - - !GetAtt ArtifactBucket.Arn
+                      - "/*"
+        - PolicyName: MaintainingPersonalizeBucket
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - Fn::Join:
+                    - ""
+                    - - !Sub 'arn:${AWS::Partition}:s3:::'
+                      - Fn::ImportValue: !Sub '${MaintainingPersonalizeStackName}-PersonalizeBucketName'
+                  - Fn::Join:
+                    - ""
+                    - - !Sub 'arn:${AWS::Partition}:s3:::'
+                      - Fn::ImportValue: !Sub '${MaintainingPersonalizeStackName}-PersonalizeBucketName'
+                      - '/*'
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSGlueServiceRole'
+
+  RelatedItemsEtlGlueJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub "${AWS::StackName}-RelatedItemsBatchInferenceETL-${EnvironmentName}"
+      Description: ETL job for processing related items batch inference job output
+      GlueVersion: 3.0
+      DefaultArguments:
+        "--enable-metrics": "true"
+        "--enable-continuous-cloudwatch-log": "true"
+        "--job-bookmark-option": "job-bookmark-enable"
+        "--TempDir": !Sub "s3://${ArtifactBucket}/temporary/"
+      MaxCapacity: 2
+      Command:
+        Name: glueetl
+        ScriptLocation: !Sub "s3://${ArtifactBucket}/scripts/related_items_etl.py"
+        PythonVersion: 3
+      ExecutionProperty:
+        MaxConcurrentRuns: 2
+      MaxRetries: 0
+      Timeout: 120
+      Role: !Ref GlueJobRole
+
+  UserPersonalizationEtlGlueJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub "${AWS::StackName}-UserPersonalizationBatchInferenceETL-${EnvironmentName}"
+      Description: ETL job for processing user personalization batch inference job output
+      GlueVersion: 3.0
+      DefaultArguments:
+        "--enable-metrics": "true"
+        "--enable-continuous-cloudwatch-log": "true"
+        "--job-bookmark-option": "job-bookmark-enable"
+        "--TempDir": !Sub "s3://${ArtifactBucket}/temporary/"
+      MaxCapacity: 2
+      Command:
+        Name: glueetl
+        ScriptLocation: !Sub "s3://${ArtifactBucket}/scripts/user_personalization_etl.py"
+        PythonVersion: 3
+      ExecutionProperty:
+        MaxConcurrentRuns: 2
+      MaxRetries: 0
+      Timeout: 120
+      Role: !Ref GlueJobRole
+
+  GlueScriptCopyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/glue_script_copy_function
+      Handler: main.lambda_handler
+      Runtime: python3.9
+      Policies:
+        - Statement:
+          - Effect: Allow
+            Action:
+              - glue:GetJob
+              - glue:UpdateJob
+            Resource:
+              - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:job/${RelatedItemsEtlGlueJob}"
+              - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:job/${UserPersonalizationEtlGlueJob}"
+          - Effect: Allow
+            Action:
+              - s3:ListBucket
+              - s3:Put*
+            Resource:
+              - !GetAtt ArtifactBucket.Arn
+              - !Join [ "", [ !GetAtt ArtifactBucket.Arn, "/scripts/*" ]]
+          - Effect: Allow
+            Action:
+              - s3:ListBucket
+              - s3:Get*
+            Resource:
+              - "arn:aws:s3:::aws-sam-cli-managed*"
+          - Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource:
+              - !GetAtt GlueJobRole.Arn
+
+  GlueCopyRelatedItemsScriptCustom:
+    Type: Custom::CopyJobScript
+    Properties:
+      ServiceToken: !GetAtt GlueScriptCopyFunction.Arn
+      JobName: !Ref RelatedItemsEtlGlueJob
+      TargetPath: !Sub "s3://${ArtifactBucket}/scripts/related_items_etl.py"
+
+  GlueCopyUserPersonalizationScriptCustom:
+    Type: Custom::CopyJobScript
+    Properties:
+      ServiceToken: !GetAtt GlueScriptCopyFunction.Arn
+      JobName: !Ref UserPersonalizationEtlGlueJob
+      TargetPath: !Sub "s3://${ArtifactBucket}/scripts/user_personalization_etl.py"
+
+##########################################################################
+#  Braze Resources                                                       #
+##########################################################################
+
+  BrazeRestEndpointUrlParameter:
+    Condition: DeployBrazeResources
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${EnvironmentName}/personalize-connectors/braze/rest-endpoint-url'
+      Type: String
+      Value: !Ref BrazeRestEndpointUrl
+
+  BrazeRestApiKeyParameter:
+    Condition: DeployBrazeResources
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${EnvironmentName}/personalize-connectors/braze/api-key'
+      Type: String
+      Value: !Ref BrazeApiKey
+
+  BrazeEnqueueFunction:
+    Condition: DeployBrazeResources
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Loads items from files in S3 into an SQS queue
+      Timeout: 900
+      CodeUri: src/braze_enqueue_function
+      Handler: main.lambda_handler
+      Layers:
+        - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:017000801446:layer:AWSLambdaPowertoolsPython:17'
+        - !Ref EnqueueCommonLayer
+      Policies:
+        - Statement:
+          - Effect: Allow
+            Action:
+              - sqs:SendMessage
+            Resource:
+              - !GetAtt BrazeUserQueue.Arn
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource: !Sub 'arn:${AWS::Partition}:s3:::*'
+      Environment:
+        Variables:
+          QUEUE_URL: !Ref BrazeUserQueue
+      Events:
+        BucketEvent:
+          Type: S3
+          Properties:
+            Bucket: !Ref ConnectorBucket
+            Events: 's3:ObjectCreated:*'
+            Filter:
+              S3Key:
+                Rules:
+                - Name: prefix
+                  Value: 'etl_jobs/'
+
+  BrazeUserDeadLetterQueue:
+    Condition: DeployBrazeResources
+    Type: AWS::SQS::Queue
+    Properties:
+      Tags:
+        - Key: CreatedBy
+          Value: Amazon-Personalize-Connectors-Solution
+
+  BrazeUserQueue:
+    Condition: DeployBrazeResources
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 610  # (Dequeue function Timeout * 6) + MaximumBatchingWindowInSeconds (https://docs.aws.amazon.com/lambda/latest/dg/with-sqs.html#events-sqs-eventsource)
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt BrazeUserDeadLetterQueue.Arn
+        maxReceiveCount: 5
+      Tags:
+        - Key: CreatedBy
+          Value: Amazon-Personalize-Connectors-Solution
+
+  BrazeDequeueFunction:
+    Condition: DeployBrazeResources
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Consumes messages from user queue and updates users in Braze
+      Timeout: 10
+      CodeUri: src/braze_dequeue_function
+      Handler: main.lambda_handler
+      ReservedConcurrentExecutions: 100
+      Layers:
+        - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:017000801446:layer:AWSLambdaPowertoolsPython:17'
+      Policies:
+        - Statement:
+          - Effect: Allow
+            Action:
+              - sqs:SendMessage
+            Resource:
+              - !GetAtt BrazeUserQueue.Arn
+          - Effect: Allow
+            Action:
+              - ssm:GetParameter*
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${EnvironmentName}/personalize-connectors/braze/*'
+      Environment:
+        Variables:
+          PARAM_PREFIX: !Sub '/${EnvironmentName}/personalize-connectors/braze/'
+      Events:
+        QueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt BrazeUserQueue.Arn
+            BatchSize: 50 # Braze max is 75 per user track API call
+            MaximumBatchingWindowInSeconds: 10
+            Enabled: true
+
+Outputs:
+  ConnectorBucket:
+    Description: S3 bucket used to stage input, output, and intermediate files used by connector resources
+    Value: !Ref ConnectorBucket
+
+  ArtifactBucket:
+    Description: S3 bucket used to store script artifacts and temporary files for Glue ETL jobs
+    Value: !Ref ArtifactBucket
+
+  BrazeUserQueueName:
+    Condition: DeployBrazeResources
+    Description: SQS queue name for the Braze user queue
+    Value: !GetAtt BrazeUserQueue.QueueName
+
+  BrazeUserDeadLetterQueueName:
+    Condition: DeployBrazeResources
+    Description: SQS dead letter queue name for the Braze user queue
+    Value: !GetAtt BrazeUserDeadLetterQueue.QueueName
+
+  BrazeEnqueueFunction:
+    Condition: DeployBrazeResources
+    Description: Lambda function that enqueues user updates into SQS for updating users in Braze
+    Value: !Ref BrazeEnqueueFunction
+
+  BrazeDequeueFunction:
+    Condition: DeployBrazeResources
+    Description: Lambda function that dequeues user updates from SQS and updates users in Braze
+    Value: !Ref BrazeDequeueFunction

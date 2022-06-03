@@ -1,0 +1,8 @@
+__pycache__/
+.DS_Store
+.aws-sam
+.venv
+.coverage
+pytestdebug.log
+**/jj_*
+samconfig.toml
