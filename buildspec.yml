@@ -1,0 +1,23 @@
+#
+# AWS Codebuild specifications
+# This file is only used for internal deployment of the code on each public commit
+# It is NOT needed if you're demoing or developping locally
+#
+
+version: 0.2
+env:
+  shell: bash
+phases:
+  install:
+    commands:
+      - echo Entered the install phase...
+      - yum -y install git
+  build:
+    commands:
+      - echo Entered the build phase...
+      - chmod +x stage.sh
+      - ./stage.sh template.yaml personalize-solution-staging-us-east-1 personalize-connectors/
+      - ./stage.sh template.yaml personalize-solution-staging-us-east-2 personalize-connectors/
+      - ./stage.sh template.yaml personalize-solution-staging-us-west-2 personalize-connectors/
+      - ./stage.sh template.yaml personalize-solution-staging-eu-west-1 personalize-connectors/
+      - ./stage.sh template.yaml personalize-solution-staging-ap-southeast-2 personalize-connectors/

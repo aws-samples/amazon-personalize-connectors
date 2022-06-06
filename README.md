@@ -193,11 +193,38 @@ You can optionally provide item metadata file(s) in the `etl_jobs/<job_type>/<jo
 {"id": "2e852905-c6f4-47db-802c-654013571922", "current_stock": 15, "name": "Pale Pink Backpack", "category": "accessories", "style": "backpack", "description": "Pale pink backpack for women", "price": 123.99, "image": "2e852905-c6f4-47db-802c-654013571922.jpg", "gender_affinity": "F", "where_visible": "UI", "image_url": "https://d22kv7nk938ern.cloudfront.net/images/accessories/2e852905-c6f4-47db-802c-654013571922.jpg"}
 {"id": "4ec7ff5c-f70f-4984-b6c4-c7ef37cc0c09", "current_stock": 17, "name": "Gainsboro Backpack", "category": "accessories", "style": "backpack", "description": "This gainsboro backpack for women is first-rate for the season", "price": 87.99, "image": "4ec7ff5c-f70f-4984-b6c4-c7ef37cc0c09.jpg", "gender_affinity": "F", "where_visible": "UI", "image_url": "https://d22kv7nk938ern.cloudfront.net/images/accessories/4ec7ff5c-f70f-4984-b6c4-c7ef37cc0c09.jpg"}
 ```
-## Installation
+
+## Installing and configuring the solution
+
+***IMPORTANT NOTE:** Deploying this solution in your AWS account will create and consume AWS resources, which will cost money. Therefore, if after installing this solution you choose not to use it as part of your Personalize deployment, be sure to follow the Uninstall instructions below to avoid ongoing charges and to clean up all data.*
 
 **You must have the [Maintaining Personalized Experiences with Machine Learning](https://aws.amazon.com/solutions/implementations/maintaining-personalized-experiences-with-ml/) solution installed before you can complete the steps below.**
 
-This solution uses the AWS [Serverless Application Model](https://aws.amazon.com/serverless/sam/) (SAM) to build and deploy resources into your AWS account.
+There are two options for installing this solution. The easiest and most convenient installation option is using CloudFormation directly. If your Amazon Personalize workload is deployed in one of the AWS regions listed in Option 1 below, click the "Launch Stack" button for the appropriate region. Otherwise, to install the solution in another AWS region, use Option 2.
+
+### Option 1: Install using CloudFormation (single-click, easiest)
+
+To support easy single-click deployments, this solution has been packaged and staged in the following regions. If your Amazon Personalize resources are deployed in one of these regions, it is recommended to use the appropriate "Launch Stack" button below. If your Personalize resources are in a different region, use Option 2.
+
+Region name | Region code | Launch
+--- | --- | ---
+US East (N. Virginia) | us-east-1 | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://s3.amazonaws.com/personalize-solution-staging-us-east-1/personalize-connectors/template.yaml&stackName=personalize-connectors)
+US East (Ohio) | us-east-2 | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://console.aws.amazon.com/cloudformation/home?region=us-east-2#/stacks/create/review?templateURL=https://s3-us-east-2.amazonaws.com/personalize-solution-staging-us-east-2/personalize-connectors/template.yaml&stackName=personalize-connectors)
+US West (Oregon) | us-west-2 | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://console.aws.amazon.com/cloudformation/home?region=us-west-2#/stacks/create/review?templateURL=https://s3-us-west-2.amazonaws.com/personalize-solution-staging-us-west-2/personalize-connectors/template.yaml&stackName=personalize-connectors)
+Europe (Ireland) | eu-west-1 | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://console.aws.amazon.com/cloudformation/home?region=eu-west-1#/stacks/create/review?templateURL=https://s3-eu-west-1.amazonaws.com/personalize-solution-staging-eu-west-1/personalize-connectors/template.yaml&stackName=personalize-connectors)
+Asia Pacific (Sydney) | ap-southeast-2 | [![Launch Stack](https://cdn.rawgit.com/buildkite/cloudformation-launch-stack-button-svg/master/launch-stack.svg)](https://console.aws.amazon.com/cloudformation/home?region=ap-southeast-2#/stacks/create/review?templateURL=https://s3-ap-southeast-2.amazonaws.com/personalize-solution-staging-ap-southeast-2/personalize-connectors/template.yaml&stackName=personalize-connectors)
+
+### Option 2: Install using Serverless Application Model (manual installation)
+
+To manually install this solution or to install this solution into a region not listed under Option 1 above, perform the following steps to install using the AWS [Serverless Application Model](https://aws.amazon.com/serverless/sam/) (SAM) tool.
+
+#### Clone the solution respository
+
+```bash
+git clone git@github.com:aws-samples/amazon-personalize-connectors.git
+```
+
+#### Install the solution using SAM
 
 To use the SAM CLI, you need the following tools locally installed.
 
@@ -205,7 +232,7 @@ To use the SAM CLI, you need the following tools locally installed.
 * [Python 3 installed](https://www.python.org/downloads/)
 * Docker - [Install Docker community edition](https://hub.docker.com/search/?type=edition&offering=community)
 
-First, ensure you are logged in to `public.ecr.aws` in Docker so SAM can download the Docker build images, by running the following command.
+Then ensure you are logged in to `public.ecr.aws` in Docker so SAM can download the Docker build images, by running the following command.
 
 ```bash
 aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws
@@ -220,6 +247,17 @@ sam deploy --guided
 ```
 
 The `sam build --use-container --cached` command will build and package the source of the solution. The `sam deploy --guided` command will prompt you for deployment configuration information and ultimately deploy the solution to your AWS account. **Be sure to deploy the solution in the same AWS region where your Amazon Personalize workload and the [Maintaining Personalized Experiences with Machine Learning](https://aws.amazon.com/solutions/implementations/maintaining-personalized-experiences-with-ml/) solution is installed.
+
+### Deployment template parameters
+
+When installing using either option above, you are presented with a few deployment parameters. These parameters control how the solution is configured to match your desired environment configuration.
+
+|Parameter name	|Type	|Valid values	|Default	|Description	|
+|---	|---	|---	|---	|---	|
+|EnvironmentName | String | Alphanumeric | 'prod' | Application environment name (such as "dev", "staging", "prod", etc). Used to organize parameters in SSM. |
+|MaintainingPersonalizeStackName | String | Alphanumeric | | Name of an active CloudFormation stack that contains the resources for the [Maintaining Personalized Experiences with Machine Learning](https://aws.amazon.com/solutions/implementations/maintaining-personalized-experiences-with-ml/) solution. This solution must already be deployed in the same account and region. The S3 bucket where Personalize batch inference job output files are written are needed by this solution. |
+|BrazeRestEndpointUrl | String | URL |  | Braze REST Endpoint to use when synchronizing recommendation details for users. See the [Braze API documentation](https://www.braze.com/docs/api/basics/#endpoints) to map your Braze instance or dashboard URL to the appropriate REST Endpoint. The format should look like: https://rest.iad-01.braze.com |
+|BrazeApiKey | String | Alphanumeric |  | Braze API Key to use when synchronizing recommendation details for users. An API Key can be created in the Braze dashboard/console. This key must have the "users.track" permission.|
 
 ## Uninstalling the solution
 
