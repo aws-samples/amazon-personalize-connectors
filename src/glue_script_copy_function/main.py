@@ -1,3 +1,6 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
 import os
 import json
 import boto3
@@ -10,56 +13,27 @@ logger.setLevel(logging.DEBUG)
 
 helper = CfnResource()
 s3 = boto3.resource('s3')
-glue = boto3.client('glue')
 
-def update_job(event):
-    job_name = event['ResourceProperties']['JobName']
+def copy_scripts(event):
+    source_path = event["ResourceProperties"]["SourcePath"]
     target_path = event["ResourceProperties"]["TargetPath"]
 
-    logger.info("Fetching job details for job %s", job_name)
-    response = glue.get_job(
-        JobName=job_name
-    )
-    logger.debug(response["Job"])
+    logger.info("Copying Glue scripts from %s to %s", source_path, target_path)
 
-    script_location = response["Job"]["Command"]["ScriptLocation"]
+    source_bucket_name, source_key = source_path.replace("s3://", "").split("/", 1)
+    target_bucket_name, target_key = target_path.replace("s3://", "").split("/", 1)
 
-    if not script_location.startswith("s3://aws-sam-cli-managed"):
-        logger.info("Script location does not appear to be SAM CLI bucket; leaving ScriptLocation as is")
-        return
+    source_bucket = s3.Bucket(source_bucket_name)
+    target_bucket = s3.Bucket(target_bucket_name)
 
-    source_bucket, source_key = script_location.replace("s3://", "").split("/", 1)
-    target_bucket, target_key = target_path.replace("s3://", "").split("/", 1)
-
-    copy_source = {
-        'Bucket': source_bucket,
-        'Key': source_key
-    }
-
-    bucket = s3.Bucket(target_bucket)
-
-    logger.info("Copying %s to %s", script_location, target_path)
-    bucket.copy(copy_source, target_key)
-
-    logger.info("Updating ScriptLocation for %s to point to target path %s", job_name, target_path)
-    job = response["Job"]
-    job.pop("Name", None)
-    job.pop("CreatedOn", None)
-    job.pop("LastModifiedOn", None)
-    if job.get("MaxCapacity"):
-        job.pop("AllocatedCapacity", None)
-        job.pop("WorkerType", None)
-        job.pop("NumberOfWorkers", None)
-    job["Command"]["ScriptLocation"] = target_path
-
-    response = glue.update_job(JobName = job_name, JobUpdate = job)
-    logger.debug(response)
-    logger.info("Job %s successfully updated", job_name)
+    for obj in source_bucket.objects.filter(Prefix = source_key):
+        source = { 'Bucket': source_bucket_name, 'Key': obj.key }
+        target = target_bucket.Object(target_key + obj.key[len(source_key):])
+        target.copy(source)
 
 @helper.create
-@helper.update
-def create_or_update_resource(event, _):
-    update_job(event)
+def create_resource(event, _):
+    copy_scripts(event)
 
 def lambda_handler(event, context):
     logger.info(os.environ)
@@ -72,4 +46,4 @@ def lambda_handler(event, context):
     else:
         logger.info('Function called outside of CloudFormation')
         # Call function directly (i.e. testing in Lambda console or called directly)
-        update_job(event)
+        copy_scripts(event)
