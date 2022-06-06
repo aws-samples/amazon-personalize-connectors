@@ -1,5 +1,5 @@
 {
-    "batchInferencePath": "s3://[PERSONALIZE_MLOPS_BUCKET/batch/[DATASET_GROUP_NAME/[SOLUTION_NAME/[SOLUTION_NAME]-YYYY-MM-DD-HH-MM-SS/",
+    "batchInferencePath": "s3://[PERSONALIZE_MLOPS_BUCKET]/batch/[DATASET_GROUP_NAME]/[SOLUTION_NAME]/[SOLUTION_NAME]_YYYY_MM_DD_HH_MM_SS/",
     "performDeltaCheck": true,
     "saveBatchInferenceErrors": false,
     "connectors": {
